@@ -18,6 +18,7 @@ import {
   sourceErrorAtom,
   sourceInfoAtom,
   sourceWarningAtom,
+  tileCacheSizeAtom,
   viewStateAtom,
   viewportAtom,
 } from "../state";
@@ -48,6 +49,17 @@ export interface VizarrViewerProps {
    * Takes precedence over `sources`.
    */
   imageConfigs?: ImageLayerConfig[];
+  /**
+   * How many reads to cache per image, in chunks and metadata documents. Applies to
+   * every image that does not set its own `cache_size`. See `ImageLayerConfig`.
+   */
+  cacheSize?: number;
+  /**
+   * How many decoded tiles to keep per multiscale image. Defaults to five times what
+   * the viewport needs, which is enough that returning to a region does not re-read
+   * it; raise it to keep more of a large image resident.
+   */
+  tileCacheSize?: number;
   /** View state of the viewer*/
   viewState?: ViewState;
   /** Callback to execute side effects when view state changes */
@@ -143,7 +155,11 @@ function ViewerBridge({
  * Comparing the contents covers both: an unchanged list reloads nothing, and a store
  * that appears on a later render is a change and loads.
  */
-function useLayerConfigs(imageConfigs: ImageLayerConfig[] | undefined, sources: string[]): ImageLayerConfig[] {
+function useLayerConfigs(
+  imageConfigs: ImageLayerConfig[] | undefined,
+  sources: string[],
+  cacheSize: number | undefined,
+): ImageLayerConfig[] {
   const ignoringSources = imageConfigs !== undefined && sources.length > 0;
   React.useEffect(() => {
     if (ignoringSources) {
@@ -151,7 +167,8 @@ function useLayerConfigs(imageConfigs: ImageLayerConfig[] | undefined, sources: 
     }
   }, [ignoringSources]);
 
-  const next = imageConfigs ?? sources.map((source) => ({ source }));
+  const given: ImageLayerConfig[] = imageConfigs ?? sources.map((source) => ({ source }));
+  const next = given.map((config) => ({ ...config, cache_size: config.cache_size ?? cacheSize }));
   const current = React.useRef(next);
   if (!sameConfigs(current.current, next)) {
     current.current = next;
@@ -176,6 +193,8 @@ function sameConfigs(a: ImageLayerConfig[], b: ImageLayerConfig[]): boolean {
 function VizarrViewerComponent({
   sources = [],
   imageConfigs,
+  cacheSize,
+  tileCacheSize,
   viewState: initialViewState,
   onViewStateChange,
   onViewerStateChange,
@@ -186,6 +205,7 @@ function VizarrViewerComponent({
   children,
 }: VizarrViewerProps) {
   const setSourceInfo = useSetAtom(sourceInfoAtom);
+  const setTileCacheSize = useSetAtom(tileCacheSizeAtom);
   const setViewStateAtom = useSetAtom(viewStateAtom);
   const sourceError = useAtomValue(sourceErrorAtom);
   const redirectObj = useAtomValue(redirectObjAtom);
@@ -196,6 +216,10 @@ function VizarrViewerComponent({
       setViewStateAtom(initialViewState);
     }
   }, [initialViewState, setViewStateAtom]);
+
+  React.useEffect(() => {
+    setTileCacheSize(tileCacheSize ?? null);
+  }, [tileCacheSize, setTileCacheSize]);
 
   const viewStateAtomWithEffect: PrimitiveAtom<ViewState | null> = atom(
     (get) => get(viewStateAtom),
@@ -211,7 +235,7 @@ function VizarrViewerComponent({
     },
   );
 
-  const layerConfigs = useLayerConfigs(imageConfigs, sources);
+  const layerConfigs = useLayerConfigs(imageConfigs, sources, cacheSize);
 
   React.useEffect(() => {
     async function loadSources() {

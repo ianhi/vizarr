@@ -27,7 +27,10 @@ export const RGB = [COLORS.red, COLORS.green, COLORS.blue];
 export const CYMRGB = Object.values(COLORS).slice(0, MAX_CHANNELS);
 export const OME_VALIDATOR_URL = "https://ome.github.io/ome-ngff-validator/";
 
-export async function normalizeStore(source: string | zarr.Readable): Promise<zarr.Location<zarr.Readable>> {
+export async function normalizeStore(
+  source: string | zarr.Readable,
+  cacheSize?: number,
+): Promise<zarr.Location<zarr.Readable>> {
   if (typeof source === "string") {
     let store: zarr.Readable;
     let path: `/${string}` = "/";
@@ -54,7 +57,7 @@ export async function normalizeStore(source: string | zarr.Readable): Promise<za
     }
 
     // Wrap remote stores in a cache
-    return new zarr.Location(lru(store), path);
+    return new zarr.Location(lru(store, cacheSize), path);
   }
 
   return zarr.root(source);
@@ -66,8 +69,8 @@ function ensureAbsolutePath(path: string): `/${string}` {
   return path.startsWith("/") ? path : `/${path}`;
 }
 
-export async function open(source: string | zarr.Readable) {
-  const location = await normalizeStore(source);
+export async function open(source: string | zarr.Readable, options: { cacheSize?: number } = {}) {
+  const location = await normalizeStore(source, options.cacheSize);
   return zarr.open(location);
 }
 

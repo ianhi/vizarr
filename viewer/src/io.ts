@@ -74,7 +74,7 @@ async function loadMultiChannel(
 }
 
 export async function createSourceData(config: ImageLayerConfig): Promise<SourceData[]> {
-  const node = await utils.open(config.source);
+  const node = await utils.open(config.source, { cacheSize: config.cache_size });
   let data: zarr.Array<zarr.DataType, zarr.Readable>[];
   let axes: Ome.Axis[] | undefined;
   if (node instanceof zarr.Group) {

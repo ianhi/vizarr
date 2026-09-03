@@ -25,8 +25,11 @@ function sanitizeKey(key: `/${string}`): `/${string}` {
   return key;
 }
 
-export function lru<S extends zarr.Readable>(store: S, maxSize = 100) {
-  const cache = new QuickLRU<string, Promise<Uint8Array | undefined>>({ maxSize });
+/** Cached reads per store, when a config does not ask for a different number. */
+export const DEFAULT_CACHE_SIZE = 100;
+
+export function lru<S extends zarr.Readable>(store: S, maxSize = DEFAULT_CACHE_SIZE) {
+  const cache = new QuickLRU<string, Promise<Uint8Array | undefined>>({ maxSize: Math.max(1, maxSize) });
   let getRange = store.getRange ? store.getRange.bind(store) : undefined;
   function get(...args: Parameters<S["get"]>) {
     const [key, opts] = args;

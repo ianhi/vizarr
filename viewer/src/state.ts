@@ -36,6 +36,15 @@ export interface ViewState {
 
 interface BaseConfig {
   source: string | zarr.Readable;
+  /**
+   * How many reads to cache for this image, in chunks and metadata documents.
+   *
+   * Applies when `source` is a url, because that is the store the viewer builds and
+   * therefore caches; a store you pass in is read as given. Defaults to 100. A chunk
+   * is held whole, so budget with the chunk size in mind: 100 chunks of 256x256 uint8
+   * is about 6 MB, while 100 chunks of 512x512 uint16 is 50 MB.
+   */
+  cache_size?: number;
   axis_labels?: string[];
   name?: string;
   colormap?: string;
@@ -293,15 +302,30 @@ const LayerConstructors = {
   grid: GridLayer,
 } as const;
 
+/**
+ * How many decoded tiles deck.gl keeps per multiscale image, or null for its own
+ * default of five times the number of tiles the viewport needs.
+ *
+ * This is the cache that decides whether panning back over a region re-reads it. It
+ * holds decoded tiles, so it is not the same thing as an image's `cache_size`, which
+ * holds the bytes a store returned.
+ */
+export const tileCacheSizeAtom = atom<number | null>(null);
+
 const layerInstanceFamily = atomFamily((a: Atom<LayerState>) =>
   atom((get) => {
     const { on, layerProps, kind } = get(a);
     if (!on) {
       return null;
     }
+    const tileCacheSize = get(tileCacheSizeAtom);
     const Layer = LayerConstructors[kind];
     // @ts-expect-error - TS can't resolve that Layer & layerProps bound together
-    return new Layer({ ...layerProps, pickable: layerProps.pickable ?? false }) as VizarrLayer;
+    return new Layer({
+      ...layerProps,
+      pickable: layerProps.pickable ?? false,
+      ...(kind === "multiscale" && tileCacheSize !== null ? { maxCacheSize: tileCacheSize } : {}),
+    }) as VizarrLayer;
   }),
 );
 

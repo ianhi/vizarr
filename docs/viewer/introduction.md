@@ -61,6 +61,31 @@ A store only has to satisfy zarrita's `Readable` interface: a `get(key)` that re
 the bytes at that key, or `undefined` when the key is absent, plus an optional
 `getRange(key, range)`.
 
+## Caching
+
+Two caches sit between the screen and the store, and they hold different things.
+
+deck.gl keeps **decoded tiles** for a multiscale image, by default five times as many
+as the viewport needs. This is the cache that decides whether returning to a region
+costs anything, and `tileCacheSize` sets it in tiles:
+
+```
+<Vizarr imageConfigs={imageConfigs} tileCacheSize={500} />
+```
+
+Behind it, a url source caches the **bytes it read**, keyed by chunk and metadata
+document, 100 reads by default. This is what a tile-cache miss falls back to, so
+raising it turns a re-read into a memory hit rather than a request. A store you pass
+in is read as given, so this applies to url sources only. Set it for one image with
+`cache_size` in its config, or for all of them with the `cacheSize` prop:
+
+```
+<Vizarr imageConfigs={[{ source: store, cache_size: 2000 }]} />
+```
+
+A chunk is held whole, so budget with the chunk size in mind: 100 chunks of 256x256
+uint8 is about 6 MB, while 100 chunks of 512x512 uint16 is 50 MB.
+
 The store is opened at its root, so scope it to the image group before passing it.
 `IcechunkStore`, for instance, has a `resolve(path)` that returns a store rooted at
 `path`.
