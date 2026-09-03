@@ -28,6 +28,7 @@ import Viewer from "./Viewer";
 
 /** Viewer state snapshot exposed to the host application via onViewerStateChange. */
 export interface ViewerInfo {
+  /** URL of the first source; empty when it is a store rather than a url, or when there are no sources. */
   sourceUrl: string;
   imageBounds: { xMin: number; yMin: number; xMax: number; yMax: number; spatialUnit: string } | null;
   zInfo: { zValue: number; zMax: number } | null;
@@ -41,6 +42,12 @@ export interface ViewerInfo {
 export interface VizarrViewerProps {
   /**  Source image urls*/
   sources?: string[];
+  /**
+   * Fully specified image layers. A config's `source` may be a zarrita store
+   * rather than a url, so a host application can supply its own reader.
+   * Takes precedence over `sources`.
+   */
+  imageConfigs?: ImageLayerConfig[];
   /** View state of the viewer*/
   viewState?: ViewState;
   /** Callback to execute side effects when view state changes */
@@ -59,7 +66,7 @@ export interface VizarrViewerProps {
  * and renders <Menu/> + <Viewer/> + children.
  */
 function ViewerBridge({
-  sourceUrls,
+  sourceUrl,
   onViewStateChange,
   onViewerStateChange,
   additionalLayers = [],
@@ -68,7 +75,7 @@ function ViewerBridge({
   onPluginHover,
   children,
 }: {
-  sourceUrls: string[];
+  sourceUrl: string;
   onViewStateChange?: (viewState: ViewState) => void;
   onViewerStateChange?: (info: ViewerInfo) => void;
   additionalLayers?: Layer[];
@@ -96,7 +103,7 @@ function ViewerBridge({
   // Notify host application when viewer state changes
   React.useEffect(() => {
     onViewerStateChange?.({
-      sourceUrl: sourceUrls[0] ?? "",
+      sourceUrl,
       imageBounds,
       zInfo,
       tInfo,
@@ -105,7 +112,7 @@ function ViewerBridge({
       setZSlice,
       setTSlice,
     });
-  }, [sourceUrls, imageBounds, zInfo, tInfo, viewport, stableSetViewState, setZSlice, setTSlice, onViewerStateChange]);
+  }, [sourceUrl, imageBounds, zInfo, tInfo, viewport, stableSetViewState, setZSlice, setTSlice, onViewerStateChange]);
 
   return (
     <>
@@ -121,8 +128,54 @@ function ViewerBridge({
   );
 }
 
+/**
+ * Turns `imageConfigs` and `sources` into one list of configs, and returns the same
+ * array as last time whenever the contents match.
+ *
+ * The images reload when this list changes, so what counts as a change matters twice:
+ *
+ * - `imageConfigs={[{ source: store }]}` builds a new array on every render. Comparing
+ *   arrays by identity would call every render a change and reload the images.
+ * - A host that opens its own store has nothing to pass on the first render, because
+ *   opening is asynchronous. Reading the prop only once, when the component mounts,
+ *   would never see the store.
+ *
+ * Comparing the contents covers both: an unchanged list reloads nothing, and a store
+ * that appears on a later render is a change and loads.
+ */
+function useLayerConfigs(imageConfigs: ImageLayerConfig[] | undefined, sources: string[]): ImageLayerConfig[] {
+  const ignoringSources = imageConfigs !== undefined && sources.length > 0;
+  React.useEffect(() => {
+    if (ignoringSources) {
+      console.warn("vizarr: both `imageConfigs` and `sources` were given, ignoring `sources`.");
+    }
+  }, [ignoringSources]);
+
+  const next = imageConfigs ?? sources.map((source) => ({ source }));
+  const current = React.useRef(next);
+  if (!sameConfigs(current.current, next)) {
+    current.current = next;
+  }
+  return current.current;
+}
+
+function sameConfigs(a: ImageLayerConfig[], b: ImageLayerConfig[]): boolean {
+  return (
+    a.length === b.length &&
+    a.every((config, i) => {
+      // A source is a url or a store object, so it is compared by identity. The rest
+      // of a config is plain data, so JSON compares it by value. Callbacks do not
+      // survive JSON, which means a new `onClick` alone does not count as a change.
+      const { source, ...rest } = config;
+      const { source: otherSource, ...otherRest } = b[i];
+      return source === otherSource && JSON.stringify(rest) === JSON.stringify(otherRest);
+    })
+  );
+}
+
 function VizarrViewerComponent({
   sources = [],
+  imageConfigs,
   viewState: initialViewState,
   onViewStateChange,
   onViewerStateChange,
@@ -158,19 +211,13 @@ function VizarrViewerComponent({
     },
   );
 
-  const [configs] = React.useState(
-    sources.map((source, index) => {
-      const config: ImageLayerConfig = {
-        source: source,
-      };
-      return config;
-    }),
-  );
+  const layerConfigs = useLayerConfigs(imageConfigs, sources);
 
   React.useEffect(() => {
     async function loadSources() {
+      setSourceError(null);
       const results = await Promise.allSettled(
-        configs.map(async (config, index) => {
+        layerConfigs.map(async (config, index) => {
           const sourceData = await createSourceData(config);
           return sourceData.flatMap((source) => {
             const id = Math.random().toString(36).slice(2);
@@ -199,13 +246,15 @@ function VizarrViewerComponent({
     }
 
     loadSources();
-  }, [configs, setSourceInfo, setSourceError]);
+  }, [layerConfigs, setSourceInfo, setSourceError]);
+
+  const firstSource = layerConfigs[0]?.source;
   return (
     <>
       {redirectObj === null && (
         <ViewStateContext.Provider value={viewStateAtomWithEffect}>
           <ViewerBridge
-            sourceUrls={sources}
+            sourceUrl={typeof firstSource === "string" ? firstSource : ""}
             onViewStateChange={onViewStateChange}
             onViewerStateChange={onViewerStateChange}
             additionalLayers={additionalLayers}

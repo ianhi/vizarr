@@ -112,6 +112,10 @@ export async function createSourceData(config: ImageLayerConfig): Promise<Source
     }
 
     if (utils.isBioformats2rawlayout(attrs)) {
+      utils.assert(
+        typeof config.source === "string",
+        "bioformats2raw layout is only supported for url sources, as it must be opened in the ome-ngff-validator.",
+      );
       let toUrl = `${utils.OME_VALIDATOR_URL}?source=${config.source}`;
       throw new utils.RedirectError("Please open in ome-ngff-validator", toUrl);
     }
